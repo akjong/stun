@@ -1,0 +1,15 @@
+{
+  "mode": "remote",
+  "remote": {
+    "host": "public-server.example.com",
+    "port": 22,
+    "user": "deploy",
+    "key": "~/.ssh/deploy_key"
+  },
+  "forwarding_list": [
+    "8080:127.0.0.1:3000",
+    "8443:127.0.0.1:8443",
+    "2222:127.0.0.1:22"
+  ],
+  "timeout": 10
+}

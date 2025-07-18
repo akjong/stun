@@ -1,0 +1,31 @@
+[package]
+name = "stun"
+version = "0.1.0"
+edition = "2024"
+authors = ["akagi201"]
+description = "SSH port forwarding and tunneling tool"
+license = "Apache-2.0"
+
+[[bin]]
+name = "stun"
+path = "src/main.rs"
+
+[lib]
+name = "stun"
+path = "src/lib.rs"
+
+[dependencies]
+clap = { version = "4.5.41", features = ["derive"] }
+config = "0.15.13"
+eyre = "0.6.12"
+russh = "0.53.0"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
+thiserror = "2.0.12"
+tokio = { version = "1.46.1", features = ["full"] }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = [
+    "env-filter",
+    "fmt",
+    "chrono",
+] }

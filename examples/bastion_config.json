@@ -1,0 +1,18 @@
+{
+  "mode": "local",
+  "remote": {
+    "host": "bastion.company.com",
+    "port": 2222,
+    "user": "admin",
+    "key": "~/.ssh/bastion_key"
+  },
+  "forwarding_list": [
+    "3306:mysql.internal:3306",
+    "5432:postgres.internal:5432",
+    "6379:redis.internal:6379",
+    "9200:elasticsearch.internal:9200",
+    "5672:rabbitmq.internal:5672",
+    "8080:webapp.internal:8080"
+  ],
+  "timeout": 5
+}
