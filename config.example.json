@@ -11,5 +11,7 @@
     "9910:127.0.0.1:9910",
     "9920:127.0.0.1:9920"
   ],
-  "timeout": 2
+  "timeout": 2,
+  "backoff_base_secs": 1,
+  "backoff_max_secs": 30
 }

@@ -21,14 +21,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "5432:postgres.internal:5432".to_string(),
         ],
         timeout: Some(5),
+        remote_probes: None,
+        backoff_base_secs: None,
+        backoff_max_secs: None,
     };
 
     println!("Creating tunnel manager...");
     let mut manager = TunnelManager::new(config)?;
 
-    println!("Starting tunnels...");
-    // This will run until the program is terminated
-    manager.start().await?;
+    println!("Starting tunnels in background...");
+    let handle = manager.start_background().await?;
+
+    println!("Press Ctrl+C to stop.");
+    tokio::signal::ctrl_c().await?;
+    println!("Stopping...");
+    manager.stop().await?;
+    let _ = handle.await;
 
     Ok(())
 }

@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{collections::HashMap, path::Path};
 
 use serde::{Deserialize, Serialize};
 
@@ -15,6 +15,13 @@ pub struct Config {
     pub forwarding_list: Vec<String>,
     /// Connection timeout in seconds
     pub timeout: Option<u64>,
+    /// Optional mapping for remote mode health probing: spec_string -> "host:port"
+    #[serde(default)]
+    pub remote_probes: Option<HashMap<String, String>>,
+    /// Base backoff seconds for restart scheduling (optional, default: 1)
+    pub backoff_base_secs: Option<u64>,
+    /// Maximum backoff seconds cap (optional, default: 30)
+    pub backoff_max_secs: Option<u64>,
 }
 
 /// Forwarding mode enumeration
@@ -98,6 +105,56 @@ impl Config {
             self.validate_forwarding_spec(spec)?;
         }
 
+        // Validate remote probes if provided
+        if let Some(map) = &self.remote_probes {
+            // Ensure keys refer to a configured spec
+            let known: std::collections::HashSet<&String> = self.forwarding_list.iter().collect();
+            for (spec_key, target) in map {
+                if !known.contains(spec_key) {
+                    return Err(StunError::Config(format!(
+                        "remote_probes key '{spec_key}' does not match any forwarding_list entry"
+                    )));
+                }
+                // Validate host:port format for target
+                let mut parts = target.rsplitn(2, ':');
+                let port_str = parts.next().unwrap_or("");
+                let host = parts.next().unwrap_or("");
+                if host.is_empty() || port_str.is_empty() {
+                    return Err(StunError::Config(format!(
+                        "Invalid remote_probe target '{target}', expected host:port"
+                    )));
+                }
+                port_str.parse::<u16>().map_err(|_| {
+                    StunError::Config(format!(
+                        "Invalid port '{port_str}' in remote_probe target '{target}'"
+                    ))
+                })?;
+            }
+        }
+
+        // Validate backoff settings if provided
+        if let Some(base) = self.backoff_base_secs
+            && base == 0
+        {
+            return Err(StunError::Config(
+                "backoff_base_secs must be >= 1".to_string(),
+            ));
+        }
+        if let Some(max) = self.backoff_max_secs
+            && max == 0
+        {
+            return Err(StunError::Config(
+                "backoff_max_secs must be >= 1".to_string(),
+            ));
+        }
+        if let (Some(base), Some(max)) = (self.backoff_base_secs, self.backoff_max_secs)
+            && max < base
+        {
+            return Err(StunError::Config(
+                "backoff_max_secs must be >= backoff_base_secs".to_string(),
+            ));
+        }
+
         Ok(())
     }
 
@@ -147,6 +204,9 @@ mod tests {
             },
             forwarding_list: vec!["8080:127.0.0.1:8080".to_string()],
             timeout: Some(5),
+            remote_probes: None,
+            backoff_base_secs: None,
+            backoff_max_secs: None,
         };
 
         assert!(config.validate().is_ok());
@@ -167,6 +227,9 @@ mod tests {
                 "9000:localhost:9000".to_string(),
             ],
             timeout: Some(10),
+            remote_probes: None,
+            backoff_base_secs: None,
+            backoff_max_secs: None,
         };
 
         // Create a temporary file for testing

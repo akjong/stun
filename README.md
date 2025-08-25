@@ -52,11 +52,13 @@ stun = { git = "https://github.com/akjong/stun" }
     "9000:127.0.0.1:9000",
     "3306:127.0.0.1:3306"
   ],
-  "timeout": 5
+  "timeout": 5,
+  "backoff_base_secs": 1,
+  "backoff_max_secs": 30
 }
 ```
 
-2. Run the CLI:
+1. Run the CLI:
 
 ```bash
 stun -c config.json
@@ -69,14 +71,18 @@ use stun::{Config, TunnelManager};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Load configuration from file
-    let config = Config::from_file("config.json")?;
-    
-    // Create and start tunnel manager
-    let mut manager = TunnelManager::new(config)?;
-    manager.start().await?;
-    
-    Ok(())
+  // Load configuration from file
+  let config = Config::from_file("config.json")?;
+
+  // Create and start tunnel manager in background; stop on Ctrl+C or your own signal
+  let mut manager = TunnelManager::new(config)?;
+  let handle = manager.start_background().await?;
+
+  // ... do other async work ... then stop gracefully
+  manager.stop().await?;
+  handle.await.ok();
+
+  Ok(())
 }
 ```
 
@@ -99,7 +105,12 @@ The configuration file is in JSON format with the following structure:
     "local_port:remote_host:remote_port",
     "bind_addr:local_port:remote_host:remote_port"
   ],
-  "timeout": 5
+  "timeout": 5,
+  "backoff_base_secs": 1,
+  "backoff_max_secs": 30,
+  "remote_probes": {
+    "spec": "host:port"
+  }
 }
 ```
 
@@ -114,6 +125,9 @@ The configuration file is in JSON format with the following structure:
 | `remote.key` | string | No | - | Path to SSH private key file |
 | `forwarding_list` | array | Yes | - | List of port forwarding specifications |
 | `timeout` | number | No | 2 | Connection timeout in seconds |
+| `backoff_base_secs` | number | No | 1 | Initial backoff for restarts (seconds) |
+| `backoff_max_secs` | number | No | 30 | Maximum backoff cap (seconds) |
+| `remote_probes` | object | No | - | Remote mode health probes: map forwarding spec string → `"host:port"` to test on the remote host via SSH |
 
 ### Port Forwarding Specifications
 
@@ -129,7 +143,7 @@ Two formats are supported:
 
 ## CLI Options
 
-```
+```text
 stun [OPTIONS] --config <FILE>
 
 OPTIONS:
@@ -167,9 +181,11 @@ RUST_LOG=stun=debug stun -c config.json
 
 1. **Initialization**: The tunnel manager parses the configuration and validates all forwarding specifications
 2. **SSH Process Management**: For each forwarding specification, an SSH process is spawned with appropriate flags
-3. **Health Monitoring**: Every 5 seconds, the manager checks:
+3. **Health Monitoring**: Every ~5 seconds, the manager checks:
    - SSH process status
-   - Port connectivity (attempts to connect to forwarded ports)
+   - Port connectivity:
+     - Local mode (`-L`): TCP probe to the local bind address/port
+     - Remote mode (`-R`): process liveness only, unless `remote_probes` are configured, in which case a TCP probe is executed on the remote host via SSH (using `nc` or `/dev/tcp` fallback)
 4. **Automatic Recovery**: If a tunnel fails health checks 3 times consecutively, it's automatically restarted
 5. **Graceful Shutdown**: On SIGINT (Ctrl+C), all SSH processes are terminated gracefully
 
@@ -196,6 +212,7 @@ Forward local ports to remote services through SSH:
 ```
 
 This creates local ports:
+
 - `localhost:3306` → `database.internal:3306` (through bastion)
 - `localhost:5432` → `postgres.internal:5432` (through bastion)
 - `localhost:6379` → `redis.internal:6379` (through bastion)
@@ -214,13 +231,20 @@ Expose local services to remote networks:
   "forwarding_list": [
     "8080:127.0.0.1:3000",
     "8443:127.0.0.1:8443"
-  ]
+  ],
+  "remote_probes": {
+    "8080:127.0.0.1:3000": "127.0.0.1:8080",
+    "8443:127.0.0.1:8443": "127.0.0.1:8443"
+  }
 }
 ```
 
 This makes local services available on the remote server:
+
 - `public-server.example.com:8080` → `localhost:3000`
 - `public-server.example.com:8443` → `localhost:8443`
+
+Remote probes (optional) allow STUN to verify in `remote` mode that the remote-side listening ports are reachable by attempting a TCP connection from the remote host to the specified `host:port`. If omitted, health checks in `remote` mode rely on SSH process liveness only.
 
 ### Development Environment
 
@@ -265,14 +289,19 @@ let config = Config {
     forwarding_list: vec![
         "8080:127.0.0.1:8080".to_string(),
     ],
-    timeout: Some(5),
+  timeout: Some(5),
+  backoff_base_secs: Some(1),
+  backoff_max_secs: Some(30),
+  remote_probes: None,
 };
 
 // Create manager
 let mut manager = TunnelManager::new(config)?;
 
-// Start tunneling (blocks until shutdown)
-manager.start().await?;
+// Start tunneling (background) and stop gracefully
+let handle = manager.start_background().await?;
+manager.stop().await?;
+handle.await.ok();
 ```
 
 ### Error Handling
@@ -324,8 +353,8 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE) for detai
 ## Acknowledgments
 
 - Inspired by SSH tunneling automation scripts
-- Built with the excellent [russh](https://github.com/warp-tech/russh) library
 - Uses [tokio](https://tokio.rs/) for async runtime
 - Configuration handling with [serde](https://serde.rs/)
 - CLI interface with [clap](https://clap.rs/)
 - Logging with [tracing](https://tracing.rs/)
+- Leverages the system OpenSSH client for robust and compatible SSH forwarding

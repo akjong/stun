@@ -47,28 +47,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     info!("Forwarding {} tunnels", config.forwarding_list.len());
 
-    // Create and start tunnel manager
+    // Create and start tunnel manager (background)
     let mut manager = TunnelManager::new(config)?;
-
-    // Set up graceful shutdown
-    let manager_task = tokio::spawn(async move {
-        if let Err(e) = manager.start().await {
-            error!("Tunnel manager error: {}", e);
-        }
-    });
-
     info!("Starting tunnel manager. Press Ctrl+C to stop.");
+    let handle = manager.start_background().await?;
 
-    // Wait for shutdown signal
-    tokio::select! {
-        _ = signal::ctrl_c() => {
-            info!("Received Ctrl+C, shutting down...");
-        }
-        result = manager_task => {
-            if let Err(e) = result {
-                error!("Manager task panicked: {}", e);
-            }
-        }
+    // Wait for Ctrl+C
+    signal::ctrl_c().await?;
+    info!("Received Ctrl+C, shutting down...");
+
+    // Trigger graceful stop and wait for management loop to exit
+    manager.stop().await?;
+    if let Err(e) = handle.await {
+        error!("Manager task join error: {}", e);
     }
 
     info!("Shutdown complete");

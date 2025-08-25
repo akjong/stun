@@ -31,10 +31,15 @@
 //!             "9000:127.0.0.1:9000".to_string(),
 //!         ],
 //!         timeout: Some(2),
+//!         remote_probes: None,
+//!         backoff_base_secs: Some(1),
+//!         backoff_max_secs: Some(30),
 //!     };
 //!
 //!     let mut manager = TunnelManager::new(config)?;
-//!     manager.start().await?;
+//!     let handle = manager.start_background().await?;
+//!     manager.stop().await?;
+//!     let _ = handle.await;
 //!
 //!     Ok(())
 //! }
