@@ -39,12 +39,6 @@ pub enum StunError {
     Other(String),
 }
 
-impl From<russh::Error> for StunError {
-    fn from(err: russh::Error) -> Self {
-        StunError::Ssh(err.to_string())
-    }
-}
-
 impl From<eyre::Error> for StunError {
     fn from(err: eyre::Error) -> Self {
         StunError::Other(err.to_string())
