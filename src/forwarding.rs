@@ -19,49 +19,49 @@ impl ForwardingSpec {
     /// Supported formats:
     /// - "port:host:port" (e.g., "8080:127.0.0.1:8080")
     /// - "address:port:host:port" (e.g., "0.0.0.0:8080:127.0.0.1:8080")
+    /// - IPv6 addresses must be enclosed in brackets, e.g., "[::1]:80:localhost:80"
     pub fn parse(spec: &str) -> StunResult<Self> {
-        let parts: Vec<&str> = spec.split(':').collect();
+        // Parse from right to left to handle IPv6 addresses correctly
+        // Format is always: [bind_addr:]bind_port:remote_host:remote_port
 
-        match parts.len() {
-            3 => {
-                // Format: port:host:port
-                let bind_port = parts[0]
-                    .parse::<u16>()
-                    .map_err(|_| StunError::Config(format!("Invalid bind port: {}", parts[0])))?;
-                let remote_host = parts[1].to_string();
-                let remote_port = parts[2]
-                    .parse::<u16>()
-                    .map_err(|_| StunError::Config(format!("Invalid remote port: {}", parts[2])))?;
+        let last_colon = spec.rfind(':').ok_or_else(|| {
+            StunError::Config(format!("Invalid forwarding specification: {spec}"))
+        })?;
 
-                Ok(ForwardingSpec {
-                    bind_address: None,
-                    bind_port,
-                    remote_host,
-                    remote_port,
-                })
-            }
-            4 => {
-                // Format: address:port:host:port
-                let bind_address = Some(parts[0].to_string());
-                let bind_port = parts[1]
-                    .parse::<u16>()
-                    .map_err(|_| StunError::Config(format!("Invalid bind port: {}", parts[1])))?;
-                let remote_host = parts[2].to_string();
-                let remote_port = parts[3]
-                    .parse::<u16>()
-                    .map_err(|_| StunError::Config(format!("Invalid remote port: {}", parts[3])))?;
+        let remote_port_str = &spec[last_colon + 1..];
+        let remote_port = remote_port_str
+            .parse::<u16>()
+            .map_err(|_| StunError::Config(format!("Invalid remote port: {remote_port_str}")))?;
 
-                Ok(ForwardingSpec {
-                    bind_address,
-                    bind_port,
-                    remote_host,
-                    remote_port,
-                })
-            }
-            _ => Err(StunError::Config(format!(
-                "Invalid forwarding specification '{spec}'. Expected format: [bind_addr:]port:host:port"
-            ))),
-        }
+        let rest = &spec[..last_colon];
+        // rest is now "[bind_addr:]bind_port:remote_host"
+
+        let second_last_colon = rest.rfind(':').ok_or_else(|| {
+            StunError::Config(format!("Invalid forwarding specification: {spec}"))
+        })?;
+
+        let remote_host = &rest[second_last_colon + 1..];
+        let rest2 = &rest[..second_last_colon];
+        // rest2 is now "[bind_addr:]bind_port"
+
+        let (bind_addr, bind_port_str) = if let Some(idx) = rest2.rfind(':') {
+            // Has bind address
+            (Some(rest2[..idx].to_string()), &rest2[idx + 1..])
+        } else {
+            // No bind address
+            (None, rest2)
+        };
+
+        let bind_port = bind_port_str
+            .parse::<u16>()
+            .map_err(|_| StunError::Config(format!("Invalid bind port: {bind_port_str}")))?;
+
+        Ok(ForwardingSpec {
+            bind_address: bind_addr,
+            bind_port,
+            remote_host: remote_host.to_string(),
+            remote_port,
+        })
     }
 
     /// Convert to SSH forwarding argument format

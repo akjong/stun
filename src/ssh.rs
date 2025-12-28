@@ -26,6 +26,8 @@ impl SshClient {
 
         // Base SSH options
         cmd.args([
+            "-N", // Do not execute a remote command
+            "-T", // Disable pseudo-terminal allocation
             "-o",
             "ServerAliveInterval=30",
             "-o",
@@ -57,9 +59,23 @@ impl SshClient {
         cmd.arg(target);
 
         // Configure stdio
-        cmd.stdin(Stdio::piped())
+        cmd.stdin(Stdio::null()) // No stdin needed with -N
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+
+        // Set parent death signal on Linux to avoid zombie processes
+        #[cfg(target_os = "linux")]
+        unsafe {
+            use std::os::unix::process::CommandExt;
+            cmd.pre_exec(|| {
+                // PR_SET_PDEATHSIG = 1
+                let ret = libc::prctl(1, libc::SIGTERM, 0, 0, 0);
+                if ret != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
 
         debug!("Starting SSH command: {:?}", cmd);
 
@@ -134,6 +150,15 @@ impl SshClient {
     /// Attempt a remote TCP connection to host:port via the SSH server.
     /// This runs a small shell test remotely. Returns true on success.
     pub async fn remote_tcp_probe(&self, host: &str, port: u16) -> StunResult<bool> {
+        // Sanitize host to prevent shell injection
+        if !host.chars().all(|c| {
+            c.is_alphanumeric() || c == '.' || c == ':' || c == '-' || c == '[' || c == ']'
+        }) {
+            return Err(StunError::Ssh(format!(
+                "Invalid characters in probe host: {host}"
+            )));
+        }
+
         // Build: ssh [opts] user@host sh -lc 'nc -z -w <timeout> <host> <port> || /dev/tcp'
         // We try netcat first; if unavailable, try bash /dev/tcp if available.
         let timeout_secs = self.config.timeout.unwrap_or(2);
@@ -141,6 +166,7 @@ impl SshClient {
         let mut cmd = Command::new("ssh");
         // base options similar to start_forwarding
         cmd.args([
+            "-T", // Disable pseudo-terminal
             "-o",
             "ServerAliveInterval=30",
             "-o",
